@@ -9,11 +9,16 @@ DB_NAME = "weather"
 DB_USER = "postgres"
 DB_PASSWORD = "postgres"
 
-def generate_weather():
+
+def generate_weather(station_id, station_lat=None):
+    """Generate weather readings. Optionally vary by latitude (e.g. colder north)."""
     current_hour = datetime.now().hour
 
-    # Суточный цикл температуры
-    base_temp = 10 + 10 * math.sin((current_hour / 24) * 2 * math.pi)
+    # Base temperature with daily cycle; optionally cooler at higher latitude
+    lat_factor = 1.0
+    if station_lat is not None:
+        lat_factor = 1.0 - (abs(station_lat) - 50) * 0.02  # rough latitude correction
+    base_temp = (10 + 10 * math.sin((current_hour / 24) * 2 * math.pi)) * lat_factor
     temperature = base_temp + random.uniform(-1.5, 1.5)
 
     humidity = 70 - (temperature * 0.5) + random.uniform(-5, 5)
@@ -24,6 +29,7 @@ def generate_weather():
     wind_speed = abs(random.gauss(5, 2))
 
     return temperature, humidity, pressure, wind_speed
+
 
 def main():
     while True:
@@ -41,16 +47,33 @@ def main():
             print("Waiting for DB...")
             time.sleep(3)
 
+    # Load stations (id, lat) for variation
     while True:
-        data = generate_weather()
-        cursor.execute("""
-            INSERT INTO weather_data
-            (timestamp, temperature, humidity, pressure, wind_speed)
-            VALUES (%s, %s, %s, %s, %s)
-        """, (datetime.now(), *data))
+        cursor.execute(
+            "SELECT id, latitude FROM stations ORDER BY id"
+        )
+        stations = cursor.fetchall()
+        if stations:
+            break
+        print("No stations found. Waiting for init...")
+        time.sleep(5)
 
-        print("Inserted:", data)
+    station_ids = [s[0] for s in stations]
+    station_lats = {s[0]: s[1] for s in stations}
+
+    while True:
+        now = datetime.now()
+        for station_id in station_ids:
+            lat = station_lats.get(station_id)
+            data = generate_weather(station_id, station_lat=lat)
+            cursor.execute("""
+                INSERT INTO weather_data
+                (station_id, timestamp, temperature, humidity, pressure, wind_speed)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (station_id, now, *data))
+            print(f"Station {station_id}: {data}")
         time.sleep(300)
+
 
 if __name__ == "__main__":
     main()

@@ -1,17 +1,28 @@
 -- ============================================
 -- SQL Queries for Redash Visualization
--- Weather Analytics Dashboard
+-- Weather Analytics Dashboard (schema: stations, sensors, weather_data)
 -- ============================================
 
 -- ============================================
--- 1. Температура за последние 24 часа (Line Chart)
+-- 0. Список станций и датчиков (Table)
+-- ============================================
+SELECT s.id, s.name AS station_name, s.latitude, s.longitude
+FROM stations s
+ORDER BY s.id;
+
+SELECT id, name AS sensor_name, unit, description FROM sensors ORDER BY id;
+
+-- ============================================
+-- 1. Температура за последние 24 часа по станциям (Line Chart)
 -- ============================================
 SELECT 
-    timestamp,
-    temperature
-FROM weather_data
-WHERE timestamp >= NOW() - INTERVAL '24 hours'
-ORDER BY timestamp ASC;
+    st.name AS station_name,
+    w.timestamp,
+    w.temperature
+FROM weather_data w
+JOIN stations st ON st.id = w.station_id
+WHERE w.timestamp >= NOW() - INTERVAL '24 hours'
+ORDER BY w.timestamp ASC;
 
 -- ============================================
 -- 2. Средние значения за последние 24 часа (Counter/Box)
@@ -25,6 +36,24 @@ SELECT
     ROUND(MAX(temperature)::numeric, 2) as max_temperature
 FROM weather_data
 WHERE timestamp >= NOW() - INTERVAL '24 hours';
+
+-- ============================================
+-- 2b. Средние по станциям за 24 часа (Table / Bar)
+-- ============================================
+SELECT 
+    st.name AS station_name,
+    st.latitude,
+    st.longitude,
+    ROUND(AVG(w.temperature)::numeric, 2) AS avg_temperature,
+    ROUND(AVG(w.humidity)::numeric, 2) AS avg_humidity,
+    ROUND(AVG(w.pressure)::numeric, 2) AS avg_pressure,
+    ROUND(AVG(w.wind_speed)::numeric, 2) AS avg_wind_speed,
+    COUNT(*) AS readings_count
+FROM weather_data w
+JOIN stations st ON st.id = w.station_id
+WHERE w.timestamp >= NOW() - INTERVAL '24 hours'
+GROUP BY st.id, st.name, st.latitude, st.longitude
+ORDER BY st.name;
 
 -- ============================================
 -- 3. Суточный цикл температуры (Line Chart)
@@ -75,16 +104,20 @@ GROUP BY wind_category
 ORDER BY MIN(wind_speed);
 
 -- ============================================
--- 7. Последние измерения (Table)
+-- 7. Последние измерения по станциям (Table)
 -- ============================================
 SELECT 
-    timestamp,
-    ROUND(temperature::numeric, 2) as temperature,
-    ROUND(humidity::numeric, 2) as humidity,
-    ROUND(pressure::numeric, 2) as pressure,
-    ROUND(wind_speed::numeric, 2) as wind_speed
-FROM weather_data
-ORDER BY timestamp DESC
+    st.name AS station_name,
+    st.latitude,
+    st.longitude,
+    w.timestamp,
+    ROUND(w.temperature::numeric, 2) AS temperature,
+    ROUND(w.humidity::numeric, 2) AS humidity,
+    ROUND(w.pressure::numeric, 2) AS pressure,
+    ROUND(w.wind_speed::numeric, 2) AS wind_speed
+FROM weather_data w
+JOIN stations st ON st.id = w.station_id
+ORDER BY w.timestamp DESC
 LIMIT 50;
 
 -- ============================================
