@@ -1,13 +1,22 @@
+import os
 import time
 import random
 import psycopg2
 from datetime import datetime
+from pathlib import Path
 import math
 
-DB_HOST = "db"
-DB_NAME = "weather"
-DB_USER = "postgres"
-DB_PASSWORD = "postgres"
+from dotenv import load_dotenv
+
+# Загрузка .env из корня проекта (рядом с docker-compose.yml)
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(_env_path)
+
+# Параметры подключения — те же названия переменных, что в .env
+DB_HOST = os.environ.get("DB_HOST", "postgres")
+DB_NAME = os.environ.get("DB_NAME", "weather_analytics")
+DB_USER = os.environ.get("DB_USER", "weather_user")
+DB_PASSWORD = os.environ.get("DB_PASSWORD", "weather_secret_change_me")
 
 
 def generate_weather(station_id, station_lat=None):
@@ -72,7 +81,7 @@ def main():
                 VALUES (%s, %s, %s, %s, %s, %s)
             """, (station_id, now, *data))
             print(f"Station {station_id}: {data}")
-        time.sleep(300)
+        time.sleep(2)
 
 
 if __name__ == "__main__":

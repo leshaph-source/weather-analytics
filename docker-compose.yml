@@ -1,71 +1,102 @@
+# Подключение к БД (для Redash — источник данных):
+#   Host: postgres, Port: 5432, User/Password/DB: из .env (DB_USER, DB_PASSWORD, DB_NAME)
+# Подробнее: db/README.md
+# Переменные окружения задаются в .env
+
 services:
-  db:
+  postgres:
     image: postgres:15
-    container_name: postgres
+    container_name: wa_postgres
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 3s
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      interval: 5s
       timeout: 5s
       retries: 5
-
-  migrate:
-    image: postgres:15
-    container_name: weather_migrate
-    depends_on:
-      db:
-        condition: service_healthy
-    environment:
-      PGPASSWORD: postgres
-    volumes:
-      - ./db/migrate_to_stations.sql:/migrate.sql
-    command: ["psql", "-h", "db", "-U", "postgres", "-d", "postgres", "-f", "/migrate.sql"]
-    restart: "no"
+      start_period: 10s
 
   redis:
     image: redis:7
     container_name: redash_redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
 
   redash:
-    image: redash/redash:latest
+    image: redash/redash:25.1.0
     container_name: redash_server
     depends_on:
-      - db
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
-      REDASH_DATABASE_URL: postgresql://postgres:postgres@db:5432/redash
+      REDASH_DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:5432/${REDASH_DB_NAME}
       REDASH_REDIS_URL: redis://redis:6379/0
+      REDASH_COOKIE_SECRET: ${REDASH_COOKIE_SECRET}
     volumes:
-      - redash_data:/app/data
+      - redash_storage:/app/data
     entrypoint: []
     command: ["bash", "-c", "if [ ! -f /app/data/.redash_initialized ]; then /app/bin/docker-entrypoint create_db && touch /app/data/.redash_initialized || true; fi; exec /app/bin/docker-entrypoint server"]
     ports:
-      - "5000:5000"
+      - "${REDASH_PORT:-5000}:5000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:5000/')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   redash_worker:
-    image: redash/redash:latest
+    image: redash/redash:25.1.0
     container_name: redash_worker
     depends_on:
-      - redash
+      redash:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
-      REDASH_DATABASE_URL: postgresql://postgres:postgres@db:5432/redash
+      REDASH_DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:5432/${REDASH_DB_NAME}
       REDASH_REDIS_URL: redis://redis:6379/0
+      REDASH_COOKIE_SECRET: ${REDASH_COOKIE_SECRET}
     command: worker
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import redis; redis.from_url('redis://redis:6379/0').ping()\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   generator:
     build: ./generator
     depends_on:
-      migrate:
-        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_HOST: ${DB_HOST}
+      DB_NAME: ${DB_NAME}
     restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import os, psycopg2; psycopg2.connect(host=os.environ.get('DB_HOST','postgres'), dbname=os.environ.get('DB_NAME','weather_analytics'), user=os.environ.get('DB_USER'), password=os.environ.get('DB_PASSWORD')).close()\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
 volumes:
-  pgdata:
-  redash_data:
+  postgres_data:
+  redash_storage:
